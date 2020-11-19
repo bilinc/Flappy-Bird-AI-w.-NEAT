@@ -3,6 +3,7 @@ import neat
 import time
 import os
 import random
+pygame.font.init()
 
 # Constants for window size
 WIN_WIDTH = 500
@@ -13,6 +14,9 @@ BIRD_IMGS = [pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bi
 PIPE_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "pipe.png")))
 BASE_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "base.png")))
 BG_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bg.png")))
+
+STAT_FONT = pygame.font.SysFont("comicsans", 50)
+
 
 # Create class for game objects
 class Bird(object):
@@ -32,6 +36,10 @@ class Bird(object):
 
 		self.img_count = 0	# which image of the bird that is currently showing
 		self.img = self.IMGS[0]
+
+	def get_x(self):
+		return self.x
+
 
 	def jump(self):
 		self.vel = -10.5	# velocity of the bird going up
@@ -105,12 +113,21 @@ class Pipe:
 
 		self.top = 0		# where top of pipe is drawn
 		self.bottom = 0		# where bottom of pipe is drawn
-		self.PIP_TOP = pygame.transform.flip(PIPE_IMG, False, True)		# flip image for the pipe on the top
-		self.PIP_BOTTOM = PIPE_IMG
+		self.PIPE_TOP = pygame.transform.flip(PIPE_IMG, False, True)		# flip image for the pipe on the top
+		self.PIPE_BOTTOM = PIPE_IMG
 
 		# used for collision detection
 		self.passed = False
 		self.set_height()
+
+	def get_x(self):
+		return self.x
+
+	def get_passed(self):
+		return self.passed
+
+	def set_passed(self, passed):
+		self.passed = passed
 
 	def set_height(self):
 		self.height = random.randrange(50, 450)
@@ -147,7 +164,7 @@ class Pipe:
 
 class Base:
 	VEL = 5
-	WIDTH = base
+	WIDTH = BASE_IMG.get_width()
 	IMG = BASE_IMG
 
 	def __init__(self, y):
@@ -157,8 +174,8 @@ class Base:
 
 	def move(self):
 		# Use two identical base images to simulate constant movement
-		self.x1 -= sefl.VEL
-		self.x2 -= sefl.VEL
+		self.x1 -= self.VEL
+		self.x2 -= self.VEL
 
 		# cycle image to the back after it's outside the window
 		if self.x1 + self.WIDTH < 0:
@@ -173,17 +190,31 @@ class Base:
 
 		
 
-def draw_window(win, bird):
+def draw_window(win, bird, pipes, base, score):
 	# draw in the window at the top left position
 	win.blit(BG_IMG, (0,0))
+	
+	# pipes comes as a list
+	for pipe in pipes:
+		pipe.draw(win)
+
+	text = STAT_FONT.render("Score: " + str(score), 1, (255, 255, 255))
+	win.blit(text, (WIN_WIDTH - 10 - text.get_width(), 10))
+	base.draw(win)
+
+
 	bird.draw(win)
 	pygame.display.update()
 
 def main():
-	bird = Bird(200, 200)
+	bird = Bird(230, 350)
+	base = Base(730)
+	pipes = [Pipe(600)]
 	win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
 	
 	clock = pygame.time.Clock()
+
+	score = 0
 
 	run = True
 	while run:
@@ -193,8 +224,36 @@ def main():
 			if event.type == pygame.QUIT:
 				run = False
 		
-		bird.move()
-		draw_window(win, bird)
+		# bird.move()
+		# add and remove pipes
+		add_pipe = False
+		rem = []
+		for pipe in pipes:
+			if pipe.collide(bird):
+				pass
+
+			if pipe.get_x() + pipe.PIPE_TOP.get_width() < 0:
+				rem.append(pipe)
+
+			if not pipe.get_passed() and pipe.get_x() < bird.get_x():
+				pipe.set_passed(True)
+				add_pipe = True
+
+			pipe.move()
+
+		if add_pipe:
+			score += 1
+			pipes.append(Pipe(600))
+
+		for r in rem:
+			pipes.remove(r)
+
+		# check if bird is on the ground
+		if bird.y + bird.img.get_height() >= 730:
+			pass
+
+		base.move()
+		draw_window(win, bird, pipes, base, score)
 
 	pygame.quit()
 	quit()
