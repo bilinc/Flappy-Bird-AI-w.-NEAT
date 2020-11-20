@@ -9,6 +9,8 @@ pygame.font.init()
 WIN_WIDTH = 500
 WIN_HEIGHT = 800
 
+GEN = 0
+
 # Load images for game
 BIRD_IMGS = [pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bird1.png"))), pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bird2.png"))), pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "bird3.png")))]
 PIPE_IMG = pygame.transform.scale2x(pygame.image.load(os.path.join("imgs", "pipe.png")))
@@ -37,8 +39,12 @@ class Bird(object):
 		self.img_count = 0	# which image of the bird that is currently showing
 		self.img = self.IMGS[0]
 
-	def get_x(self):
-		return self.x
+	def get(self, var):
+		
+		if var == "x":
+			return self.x
+		elif var == "y":
+			return self.y
 
 
 	def jump(self):
@@ -109,19 +115,21 @@ class Pipe:
 	def __init__(self, x):
 		self.x = x
 		self.height = 0
-		self.gap = 100
 
 		self.top = 0		# where top of pipe is drawn
 		self.bottom = 0		# where bottom of pipe is drawn
+
 		self.PIPE_TOP = pygame.transform.flip(PIPE_IMG, False, True)		# flip image for the pipe on the top
 		self.PIPE_BOTTOM = PIPE_IMG
 
 		# used for collision detection
 		self.passed = False
+
 		self.set_height()
 
-	def get_x(self):
-		return self.x
+	def get(self, var):
+		if var == "x":
+			return self.x
 
 	def get_passed(self):
 		return self.passed
@@ -132,7 +140,7 @@ class Pipe:
 	def set_height(self):
 		self.height = random.randrange(50, 450)
 		self.top = self.height - self.PIPE_TOP.get_height()
-		self.bottom = self.height + self.gap
+		self.bottom = self.height + self.GAP
 
 	def move(self):
 		self.x -= self.VEL
@@ -147,8 +155,8 @@ class Pipe:
 		top_mask = pygame.mask.from_surface(self.PIPE_TOP)
 		bottom_mask = pygame.mask.from_surface(self.PIPE_BOTTOM)
 
-		top_offset = (self.x - bird.x, self.top - round(bird.y))
-		bottom_offset = (self.x - bird.x, self.bottom - round(bird.y))
+		top_offset = (self.x - bird.x, int(self.top - round(bird.y)))
+		bottom_offset = (self.x - bird.x, int(self.bottom - round(bird.y)))
 
 		# finding point of collision
 		# how far away is the bird mask from the bottom of the pipe using the bottom offset
@@ -190,7 +198,7 @@ class Base:
 
 		
 
-def draw_window(win, bird, pipes, base, score):
+def draw_window(win, birds, pipes, base, score, gen):
 	# draw in the window at the top left position
 	win.blit(BG_IMG, (0,0))
 	
@@ -198,16 +206,41 @@ def draw_window(win, bird, pipes, base, score):
 	for pipe in pipes:
 		pipe.draw(win)
 
-	text = STAT_FONT.render("Score: " + str(score), 1, (255, 255, 255))
-	win.blit(text, (WIN_WIDTH - 10 - text.get_width(), 10))
 	base.draw(win)
 
+	for bird in birds:
+		bird.draw(win)
 
-	bird.draw(win)
+	# score
+	score_label = STAT_FONT.render("Score: " + str(score), 1, (255, 255, 255))
+	win.blit(score_label, (WIN_WIDTH - 10 - score_label.get_width(), 10))
+
+	# generation
+	gen_label = STAT_FONT.render("Gen: " + str(gen), 1, (255, 255, 255))
+	win.blit(gen_label, (10, 10))
+
 	pygame.display.update()
 
-def main():
-	bird = Bird(230, 350)
+
+def eval_genomes(genomes, config):
+	# Our fitness function
+
+	global GEN
+	GEN += 1
+
+	nets = []
+	ge = []
+	birds = []
+
+	for _, g in genomes:	# genomes is a tuple (id, genome_object)
+		net = neat.nn.FeedForwardNetwork.create(g, config)
+		nets.append(net)
+		birds.append(Bird(230, 350))
+		g.fitness = 0
+		ge.append(g)
+
+
+
 	base = Base(730)
 	pipes = [Pipe(600)]
 	win = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
@@ -219,43 +252,114 @@ def main():
 	run = True
 	while run:
 		clock.tick(30)	# animation 30 ticks every second
+
 		for event in pygame.event.get():
 			# if click red X, quit game
 			if event.type == pygame.QUIT:
 				run = False
-		
-		# bird.move()
-		# add and remove pipes
-		add_pipe = False
-		rem = []
-		for pipe in pipes:
-			if pipe.collide(bird):
-				pass
 
-			if pipe.get_x() + pipe.PIPE_TOP.get_width() < 0:
+				pygame.quit()
+				quit()
+		
+
+		pipe_ind = 0
+		if len(birds) > 0:
+			if len(pipes) > 1 and birds[0].get("x") > pipes[0].get("x") + pipes[0].PIPE_TOP.get_width():
+				pipe_ind = 1
+
+		else:
+			run = False
+			break
+
+		for x, bird in enumerate(birds):
+			ge[x].fitness += 0.1
+			bird.move()
+
+			# output from the neural network
+			output = nets[x].activate((bird.get("y"), abs(bird.get("y") - pipes[pipe_ind].height), abs(bird.get("y") - pipes[pipe_ind].bottom)))
+
+			# the output layer is a list, but we only have one neuron so only need to check once
+			if output[0] > 0.5:
+				bird.jump()
+
+		# bird.move()
+		base.move()
+
+		# add and remove pipes
+		rem = []
+		add_pipe = False
+		for pipe in pipes:
+			pipe.move()
+			# check for collision
+			for x, bird in enumerate(birds):
+				if pipe.collide(bird):
+					ge[x].fitness -= 1	# deduct fitness score for birds who are hitting objects
+					birds.pop(x)		# remove bird genomes who have hit objects
+					nets.pop(x)
+					ge.pop(x)
+
+			
+			if pipe.get("x") + pipe.PIPE_TOP.get_width() < 0:
 				rem.append(pipe)
 
-			if not pipe.get_passed() and pipe.get_x() < bird.get_x():
+			if not pipe.get_passed() and pipe.get("x") < bird.get("x"):
 				pipe.set_passed(True)
 				add_pipe = True
 
-			pipe.move()
+
+
 
 		if add_pipe:
 			score += 1
+			
+			for g in ge:
+				g.fitness += 5	# reward the bird genomes that are still alive
+
 			pipes.append(Pipe(600))
 
 		for r in rem:
 			pipes.remove(r)
 
-		# check if bird is on the ground
-		if bird.y + bird.img.get_height() >= 730:
-			pass
+		# check if bird has hit the ground
+		for x, bird in enumerate(birds):
+			if bird.get("y") + bird.img.get_height() >= 730 or bird.get("y") < -50:
+				birds.pop(x)
+				nets.pop(x)
+				ge.pop(x)
+
 
 		base.move()
-		draw_window(win, bird, pipes, base, score)
+		draw_window(win, birds, pipes, base, score, GEN)
 
-	pygame.quit()
-	quit()
 
-main()
+
+def run(config_path):
+	'''
+	load the neat configuration file and execute
+	'''
+	import pickle
+
+	config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, neat.DefaultSpeciesSet, neat.DefaultStagnation, config_path)
+
+
+	# set the population
+	p = neat.Population(config)
+
+	# receive the output
+	p.add_reporter(neat.StdOutReporter(True))	# gives stats
+	stats = neat.StatisticsReporter()
+	p.add_reporter(stats)
+
+
+	# fitness function
+	winner = p.run(eval_genomes, 50)
+
+	with open('bestBird.pickle', 'wb') as f:
+		pickle.dump(winner, f, pickle.HIGHEST_PROTOCOL)
+
+
+if __name__ == "__main__":
+	local_directory = os.path.dirname(__file__)
+	config_path = os.path.join(local_directory, "config-feedforward.txt")
+
+	run(config_path)
